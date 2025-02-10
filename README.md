@@ -16,7 +16,7 @@ This application is used as an external package for Buildroot.
 
 This package is integrated into [buildroot_external_example](https://github.com/moschiel/buildroot_external_example) and can be selected in `menuconfig`. Buildroot will automatically fetch, compile, and install it.
 
-## 🚀 To Manually Compile and Executie
+## 🚀 To Manually Compile and Execute
 
 ### 🔹 Compilation
 
