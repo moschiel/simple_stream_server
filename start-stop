@@ -1,0 +1,30 @@
+#!/bin/sh
+
+# init.d script for simple_stream_server executable
+
+# Shortened options for better readability
+# --start = -S
+# --stop = -K
+# --exec = -a
+
+NAME=simple_stream_server
+DAEMON=/usr/bin/${NAME}
+
+case "$1" in
+    start)
+        echo "Starting ${NAME}..."
+        start-stop-daemon --start --name $NAME --exec $DAEMON -- -d
+        echo "${NAME} started."
+        ;;
+    stop)
+        echo "Stopping ${NAME}..."
+        start-stop-daemon --stop --name $NAME
+        echo "${NAME} stopped."
+        ;;
+    *)
+        echo "Usage: $0 {start|stop}"
+        exit 1
+        ;;
+esac
+
+exit 0
