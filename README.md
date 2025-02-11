@@ -120,7 +120,7 @@ If running **outside Buildroot**, you can manually configure the server to start
    ```
    **BusyBox init** uses the beginnig of the file name **(SXX)** to identify startup priority of the init.d script.
 
-   A lower number starts earlier; a hifher number starts later.
+   A lower number starts earlier; a higher number starts later.
 
    So in **S99**, **S** means **start** and **99** indicates it is probably the last one to be executed.
 
