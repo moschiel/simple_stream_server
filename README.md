@@ -116,13 +116,14 @@ If running **outside Buildroot**, you can manually configure the server to start
 
 2. **Move the `start-stop` script to `/etc/init.d/` and rename to `S99simple_stream_server` (so it runs at boot):**  
    ```bash
-   sudo ln -s /etc/init.d/simple_stream_server /etc/rc.d/rc3.d/S99simple_stream_server
+   sudo cp start-stop /etc/init.d/S99simple_stream_server
+   sudo chmod +x /etc/init.d/S99simple_stream_server
    ```
    **BusyBox init** uses the beginnig of the file name **(SXX)** to identify startup priority of the init.d script.
 
    A lower number starts earlier; a higher number starts later.
 
-   So in **S99**, **S** means **start** and **99** indicates it is probably the last one to be executed.
+   That's why it starts with **S99**, where **S** means **start** and **99** indicates it is probably the last one to be executed.
 
 
 **Note:** These steps **manually replicate** what **Buildroot does automatically** when the package is installed. If using **Buildroot**, you **do not need to do this manually**—the system will handle it during the build process.
