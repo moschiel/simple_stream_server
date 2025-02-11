@@ -4,7 +4,7 @@
 
 It can run either in the foreground or as a **daemon**, allowing it to execute in the background.
 
-This application is designed to be a example of **External Package to be integrated into Buildroot** and configured to **start automatically** using **BusyBox init**.
+This application is **designed to be used as an example** of a **External Package to be integrated into Buildroot** and configured to **start automatically** using **BusyBox init**.
 
 ## 📂 Repository Structure
 
@@ -15,7 +15,7 @@ This application is designed to be a example of **External Package to be integra
 
 ## Using with Buildroot (as a External Package)
 
-This package is integrated into [buildroot_external_example](https://github.com/moschiel/buildroot_external_example) and can be selected in `menuconfig`.
+This package is integrated as as external package into [buildroot_external_example](https://github.com/moschiel/buildroot_external_example) and can be selected in `menuconfig`.
 
 When included in a Buildroot-based system, the following steps are automatically handled: 
 
@@ -103,34 +103,25 @@ Another message
 
 ---
 
-## 🔄 Configuring Auto-Start on Boot (Outside Buildroot)
+## 🔄 Configuring Auto-Start on Boot with BusyBox init (Outside Buildroot)
 
-If running **outside Buildroot**, you can manually configure the server to start at boot using the included `start-stop` script.
+If running **outside Buildroot**, you can manually configure the server to start at boot **just like Buildroot does** using the included `start-stop` script.
 
-### 🔹 Installing the Startup Script
-1. **Move the script to `/etc/init.d/`**:  
+### 🔹 Manually Installing the Startup Script
+1. **Move the server executable to `/usr/bin/` (so it can be executed from any directory):**:  
    ```bash
-   sudo cp start-stop /etc/init.d/simple_stream_server
-   sudo chmod +x /etc/init.d/simple_stream_server
+   sudo cp simple_stream_server /usr/bin/
+   sudo chmod +x /usr/bin/simple_stream_server
    ```
 
-2. **Enable auto-start (SysV/BusyBox init):**  
+2. **Move the `start-stop` script to `/etc/init.d/` and rename to `S99simple_stream_server` (so it runs at boot):**  
    ```bash
    sudo ln -s /etc/init.d/simple_stream_server /etc/rc.d/rc3.d/S99simple_stream_server
-   sudo ln -s /etc/init.d/simple_stream_server /etc/rc.d/rc0.d/K01simple_stream_server
    ```
+   BusyBox init uses the beginnig of the name to identify how to startup, so in **S99**, **S** means **start** and **99** indicates it is the 99th script to be executed (probably the last one)
 
-### 🔹 Starting and Stopping Manually
-- Start the server:  
-  ```bash
-  sudo /etc/init.d/simple_stream_server start
-  ```
-- Stop the server:  
-  ```bash
-  sudo /etc/init.d/simple_stream_server stop
-  ```
 
-**Note:** These steps are **not necessary if using Buildroot**, as the package handles it automatically.
+**Note:** These steps **manually replicate** what **Buildroot does automatically** when the package is installed. If using **Buildroot**, you **do not need to do this manually**—the system will handle it during the build process.
 
 ---
 
