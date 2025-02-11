@@ -2,21 +2,34 @@
 
 `simple_stream_server` is a **simple TCP server** written in C that accepts client connections, stores received data in a file, and returns the full content of this file to the client. 
 
-It can run in normal mode or as a **daemon**, allowing it to execute in the background.
+It can run either in the foreground or as a **daemon**, allowing it to execute in the background.
 
-This application is used as an external package for Buildroot.
+This application is designed to be a example of **External Package to be integrated into Buildroot** and configured to **start automatically** using **BusyBox init**.
 
 ## 📂 Repository Structure
 
 - **`simple_stream_server.c`**: Main server source code.
 - **`Makefile`**: Script to compile the project.
+- **`start-stop`**: Startup script compatible with BusyBox init.
 - **`README.md`**: This documentation file.
 
-## Usage in Buildroot
+## Using with Buildroot (as a External Package)
 
-This package is integrated into [buildroot_external_example](https://github.com/moschiel/buildroot_external_example) and can be selected in `menuconfig`. Buildroot will automatically fetch, compile, and install it.
+This package is integrated into [buildroot_external_example](https://github.com/moschiel/buildroot_external_example) and can be selected in `menuconfig`.
 
-## 🚀 To Manually Compile and Execute
+When included in a Buildroot-based system, the following steps are automatically handled: 
+
+✅ Cloning this repository.
+
+✅ Compiling simple_stream_server.
+
+✅ Installing the executable in `/usr/bin/`.
+
+✅ Installing the startup script (`start-stop`) in `/etc/init.d/`, so the server starts on boot.
+
+
+## 🚀 Standalone Manual Compilation and Execution (Outside buildroot)
+If you want to compile and execute this application as a standalone, do the following:
 
 ### 🔹 Compilation
 
@@ -88,7 +101,42 @@ Hello, Server!    # <- Server returns the stored history
 Another message
 ```
 
+---
+
+## 🔄 Configuring Auto-Start on Boot (Outside Buildroot)
+
+If running **outside Buildroot**, you can manually configure the server to start at boot using the included `start-stop` script.
+
+### 🔹 Installing the Startup Script
+1. **Move the script to `/etc/init.d/`**:  
+   ```bash
+   sudo cp start-stop /etc/init.d/simple_stream_server
+   sudo chmod +x /etc/init.d/simple_stream_server
+   ```
+
+2. **Enable auto-start (SysV/BusyBox init):**  
+   ```bash
+   sudo ln -s /etc/init.d/simple_stream_server /etc/rc.d/rc3.d/S99simple_stream_server
+   sudo ln -s /etc/init.d/simple_stream_server /etc/rc.d/rc0.d/K01simple_stream_server
+   ```
+
+### 🔹 Starting and Stopping Manually
+- Start the server:  
+  ```bash
+  sudo /etc/init.d/simple_stream_server start
+  ```
+- Stop the server:  
+  ```bash
+  sudo /etc/init.d/simple_stream_server stop
+  ```
+
+**Note:** These steps are **not necessary if using Buildroot**, as the package handles it automatically.
+
+---
+
+
 📌 **Summary:**  
 - The server **stores all received messages** and **returns the full file content** at the end of each interaction.  
 - Whenever a client connects, it **receives the complete stored history**.
-
+- **Integrated with Buildroot** in the repository [buildroot_external_example](https://github.com/moschiel/buildroot_external_example), where it is automatically installed and configured.  
+- **Can be manually installed and set to start on boot** outside Buildroot.  
