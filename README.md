@@ -118,7 +118,11 @@ If running **outside Buildroot**, you can manually configure the server to start
    ```bash
    sudo ln -s /etc/init.d/simple_stream_server /etc/rc.d/rc3.d/S99simple_stream_server
    ```
-   BusyBox init uses the beginnig of the name to identify how to startup, so in **S99**, **S** means **start** and **99** indicates it is the 99th script to be executed (probably the last one)
+   **BusyBox init** uses the beginnig of the file name **(SXX)** to identify startup priority of the init.d script.
+
+   A lower number starts earlier; a hifher number starts later.
+
+   So in **S99**, **S** means **start** and **99** indicates it is probably the last one to be executed.
 
 
 **Note:** These steps **manually replicate** what **Buildroot does automatically** when the package is installed. If using **Buildroot**, you **do not need to do this manually**—the system will handle it during the build process.
