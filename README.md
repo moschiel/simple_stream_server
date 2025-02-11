@@ -126,7 +126,7 @@ If running **outside Buildroot**, you can manually configure the server to start
    That's why it starts with **S99**, where **S** means **start** and **99** indicates it is probably the last one to be executed.
 
 
-**Note:** These steps **manually replicate** what **Buildroot does automatically** when the package is installed. If using **Buildroot**, you **do not need to do this manually**—the system will handle it during the build process.
+**Note:** These steps **manually replicate** what **Buildroot does automatically** when the package is installed ([buildroot_external_example](https://github.com/moschiel/buildroot_external_example)). If using [buildroot_external_example](https://github.com/moschiel/buildroot_external_example), you **do not need to do this manually**—the system will handle it during the build process.
 
 ---
 
