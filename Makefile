@@ -1,9 +1,25 @@
 CC = $(CROSS_COMPILE)gcc
 
-CFLAGS ?= -Wall -Wextra -Werror
+# Add -g (and optionally -O0) to produce debug symbols for Valgrind
 
-all:
-	$(CC) $(CFLAGS) simple_stream_server.c -o simple_stream_server
+CFLAGS ?= -Wall -Wextra -g -O0
+
+SRCS = simple_stream_server.c \
+	   server_utils.c \
+	   connection_handler.c \
+	   thread_list.c
+
+OBJS = $(SRCS:.c=.o)
+
+TARGET = simple_stream_server
+
+all: $(TARGET)
+
+$(TARGET): $(OBJS)
+	$(CC) $(CFLAGS) -o $(TARGET) $(OBJS)
+
+%.o: %.c
+	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -f simple_stream_server
+	rm -f $(OBJS) $(TARGET)

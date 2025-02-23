@@ -1,6 +1,7 @@
 # Simple Stream Server
 
-`simple_stream_server` is a **simple TCP server** written in C that accepts client connections, stores received data in a file, and returns the full content of this file to the client. 
+`simple_stream_server` is a **simple TCP server** written in C that accepts client connections, stores received data in a file, and returns the full content of this file to the client.
+Is supports multiple simultaneous connections using threads. Each incoming connection is handled by a separate thread, ensuring parallel processing of client requests.
 
 It can run either in the foreground or as a **daemon**, allowing it to execute in the background.
 
@@ -9,9 +10,47 @@ This application is **designed to be used as an example** of a **External Packag
 ## 📂 Repository Structure
 
 - **`simple_stream_server.c`**: Main server source code.
+- **`thread_list.c/h`**: Manages the linked list of active threads.
+- **`connection_handler.c/h`**: Handles client connections in separate threads.
+- **`server_utils.c/h`**: Contains helper functions for managing the server.
 - **`Makefile`**: Script to compile the project.
 - **`start-stop`**: Startup script compatible with BusyBox init.
 - **`README.md`**: This documentation file.
+
+
+## 🛠 Features
+
+### 🔹 Easy Client Interaction
+   - Clients can connect using `netcat (nc)` or `telnet`.
+   - The server stores received messages and sends back the entire content of the file.
+
+### 🔹 Daemon Mode Support
+   - The server can run in **normal mode** or as a **background daemon**.
+
+### 🔹 Multithreading Support
+   - The server supports **multiple simultaneous connections**.
+
+   - Each connection spawns a **new thread** to handle the interaction.
+
+   - A **linked list** is used to manage active threads.
+
+   - Threads are properly joined using `pthread_join()` (no detached threads).
+
+### 🔹 Thread-Safe File Writing
+   - A mutex (pthread_mutex_t********) ensures that data written by different clients does not intermix.
+
+   - Example:
+      - If one client writes `12345678` and another writes `abcdefg`, the file will always contain ordered entries like:
+      12345678
+      abcdefg
+
+   - It will not result in interleaved data like `123abc456defg`.
+
+### 🔹 Graceful Shutdown on SIGTERM/SIGINT
+   - The server catches termination signals (SIGTERM, SIGINT).
+
+   - When exiting, it requests all threads to terminate and waits for their completion.
+
 
 ## Using with Buildroot (as a External Package)
 

@@ -5,159 +5,147 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <fcntl.h>
 #include <errno.h>
 #include <string.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <netdb.h>
-#include <arpa/inet.h>
-#include <sys/wait.h>
-#include <signal.h>
 #include <syslog.h>
-#include <fcntl.h>
+#include <signal.h>
+#include <sys/time.h>
+#include <pthread.h>
+#include <signal.h>
 
+#include "simple_stream_server.h"
+#include "server_utils.h"
+#include "thread_list.h"
+
+#define USE_THREAD_TIMER 1
+#define USE_INTERRUPT_TIMER (!USE_THREAD_TIMER)
 
 #define PORT "9000" // the port users will be connecting to
-#define BACKLOG 10   // how many pending connections queue will hold
-#define TMP_DATA_FILE "/var/tmp/SimpleServerSocketData"
-#define BUFFER_SIZE 1024
 
-int server_sockfd = -1; // server socket file descriptor
-int client_sockfd = -1; // client socket file descriptor
 
-void handle_signal(int sig) {
-    (void)sig; // quiet unused variable warning
+volatile sig_atomic_t keep_running = 1; /* Flag to keep server running */
+pthread_mutex_t file_mutex = PTHREAD_MUTEX_INITIALIZER; // Global mutex for file writes.
 
+void write_timestamp() {
+    /* Build the timestamp string in RFC 2822 style */
+    time_t rawtime;
+    struct tm tm_info;
+    
+    time(&rawtime);
+    /* localtime_r is thread-safe version of localtime */
+    localtime_r(&rawtime, &tm_info);
+    
+    /* Example RFC 2822-like format: "Fri, 07 Oct 2022 06:59:23 +0000" */
+    char auxtimebuf[64];
+    strftime(auxtimebuf, sizeof(auxtimebuf), "%a, %d %b %Y %T %z", &tm_info);
+    char timebuffer[128];
+    snprintf(timebuffer, sizeof(timebuffer), "timestamp:%s\n", auxtimebuf);
+
+    syslog(LOG_INFO, "%s", timebuffer);
+
+    /* Lock the mutex before writing to DATA_FILE_PATH */
+    pthread_mutex_lock(&file_mutex);
+    {
+        /* Append-only open */
+        #if USE_SYSCALL_FILE
+        int fd = open(DATA_FILE_PATH, O_CREAT | O_WRONLY | O_APPEND, 0644);
+        #else
+        FILE *fd = fopen(DATA_FILE_PATH, "a");
+        #endif
+
+        if (fd != INVALID_FILE) {
+            /* "timestamp: <RFC2822 time>" followed by a newline */
+            #if USE_SYSCALL_FILE
+            write(fd, timebuffer, strlen(timebuffer));
+            close(fd);
+            #else
+            fwrite(timebuffer, 1, strlen(timebuffer), fd);
+            fclose(fd);
+            #endif
+        } else {
+            syslog(LOG_ERR, "%s (timer_thread_func): %s", USE_SYSCALL_FILE ? "open" : "fopen", strerror(errno));
+        }
+    }
+    pthread_mutex_unlock(&file_mutex);
+}
+
+#if USE_THREAD_TIMER
+void *timer_thread_func(void *arg) {
+    (void)arg; // quiet unused variable warning
+    while (keep_running) {
+        
+        // Wait 10 seconds
+        for(int i=0; i<10 && keep_running; i++){
+            sleep(1);  //sleep 1 second
+            join_exited_threads(); //check if there is any exited thread to join
+        }
+        
+        if(!keep_running) 
+            break;
+
+        //Each 10 seconds, write timestamp to file
+        write_timestamp();
+    }
+
+    syslog(LOG_INFO, "Exiting 'timer' thread, tid: %lu,", pthread_self());
+
+    set_thread_as_exited(pthread_self());
+
+    return NULL;
+}
+
+int setup_timer_thread() {
+    pthread_t tid;
+    if (pthread_create(&tid, NULL, timer_thread_func, NULL) != 0) {
+        syslog(LOG_ERR, "setup_timer_thread: %s", strerror(errno));
+        return EXIT_FAILURE;
+    }
+    add_thread_to_list(tid);
+    return 0;
+}
+#else
+void timer_handler(int signum) {
+    (void)signum; // quiet unused variable warning
+    printf("timer\n");
+}
+
+int setup_timer_handler() {
+    // Set up the signal handler for SIGALRM
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = timer_handler;
+    sigaction(SIGALRM, &sa, NULL);
+
+    // Configure the timer to expire after 10 seconds, then every 10 seconds
+    struct itimerval timer;
+    timer.it_value.tv_sec = 10;      // first expiration after 10s
+    timer.it_value.tv_usec = 0;
+    timer.it_interval.tv_sec = 10;   // subsequent intervals of 10s
+    timer.it_interval.tv_usec = 0;
+
+    // Start the real-time timer (ITIMER_REAL)
+    if (setitimer(ITIMER_REAL, &timer, NULL) == -1) {
+        syslog(LOG_ERR, "setitimer: %s", strerror(errno));
+        return EXIT_FAILURE;
+    }
+    return 0;
+}
+#endif
+
+void signal_exit_handler(int signum) {
+    (void)signum; // quiet unused variable warning
     syslog(LOG_INFO, "Caught signal, exiting");
-
-    //Close any open socket
-    if (server_sockfd != -1) close(server_sockfd);
-    if (client_sockfd != -1) close(client_sockfd);
-
-    // Delete data file
-    remove(TMP_DATA_FILE);  
-    closelog();
+    server_stop();
     exit(0);
 }
 
-void setup_signal_handlers() {
+void setup_signal_exit_handlers() {
     struct sigaction sa;
     memset(&sa, 0, sizeof(sa));
-    sa.sa_handler = handle_signal;
+    sa.sa_handler = signal_exit_handler;
     sigaction(SIGINT, &sa, NULL);
     sigaction(SIGTERM, &sa, NULL);
-}
-
-void print_addrinfo_node(struct addrinfo *node) {
-    if (node == NULL) {
-        printf("addrinfo node is NULL\n");
-        return;
-    }
-
-    char ipstr[INET6_ADDRSTRLEN]; // Buffer para armazenar o IP como string
-    void *addr;
-    char *ipver;
-
-    // Verifica o tipo de endereço
-    if (node->ai_family == AF_INET) { // IPv4
-        struct sockaddr_in *ipv4 = (struct sockaddr_in *)node->ai_addr;
-        addr = &(ipv4->sin_addr);
-        ipver = "IPv4";
-    } else if (node->ai_family == AF_INET6) { // IPv6
-        struct sockaddr_in6 *ipv6 = (struct sockaddr_in6 *)node->ai_addr;
-        addr = &(ipv6->sin6_addr);
-        ipver = "IPv6";
-    } else {
-        printf("Unknown address family: %d\n", node->ai_family);
-        return;
-    }
-
-    // Converte o endereço IP para string
-    inet_ntop(node->ai_family, addr, ipstr, sizeof(ipstr));
-
-    // Imprime as informações
-    printf("Address Info -> Family: %s, Address: %s, Socktype: %d, Protocol: %d, CanonName: %s\n", 
-    ipver, ipstr, node->ai_socktype, node->ai_protocol, node->ai_canonname != NULL ? node->ai_canonname : "--");
-}
-
-int open_server_socket() {
-    struct addrinfo hints, *servinfo, *p;
-    int rv;
-    int yes=1;
-
-    memset(&hints, 0, sizeof hints);
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
-    hints.ai_flags = AI_PASSIVE; // use my IP
-    
-    /* 
-        getaddrinfo() is an excellent function that will return information on a particular host name (such as its IP address) 
-        and load up a struct sockaddr for you, taking care of the gritty details (like if it’s IPv4 or IPv6). 
-    */
-    if ((rv = getaddrinfo(NULL, PORT, &hints, &servinfo)) != 0) {
-        syslog(LOG_ERR, "getaddrinfo failed: %s\n", gai_strerror(rv));
-        return -1;
-    }
-    
-      // loop through all the results and bind to the first we can
-    for(p = servinfo; p != NULL; p = p->ai_next) {
-        print_addrinfo_node(p);
-
-        /*
-            socket() returns a new socket descriptor that you can use to do sockety things with. 
-            This is generally the first call in the whopping process of writing a socket program, 
-            and you can use the result for subsequent calls to listen(), bind(), accept(), or a variety of other functions.
-        */
-        if ((server_sockfd = socket(p->ai_family, p->ai_socktype,
-                p->ai_protocol)) == -1) {
-            syslog(LOG_ERR, "socket creation failed: %s", strerror(errno));
-            continue;
-        }
-        
-        // confifure the created socket
-        if ( setsockopt(
-                server_sockfd,     // the socket we want to configure 
-                SOL_SOCKET, 
-                SO_REUSEADDR, // int optname, SO_REUSEADDR allows other sockets to bind() to this port, unless there is an active listening socket bound to the port already. 
-                              // This enables you to get around those “Address already in use” error messages when you try to restart your server after a crash.
-                &yes,         // void *optval, it’s usually a pointer to an int indicating the value in question. 
-                              // For booleans, zero is false, and non-zero is true. And that’s an absolute fact, unless it’s different on your system. 
-                              // If there is no parameter to be passed, optval can be NULL.
-                sizeof(int)) == -1 //socklen_t optlen, should be set to the length of optval, probably sizeof(int), but varies depending on the option
-        ) {
-            syslog(LOG_ERR, "setsockopt failed: %s", strerror(errno));
-            return -1;
-        }
-
-        /* 
-            bind() associate a socket with an IP address and port number.
-            When a remote machine wants to connect to your server program, it needs two pieces of information: 
-            the IP address and the port number. The bind() call allows you to do just that.
-        */
-        if (bind(server_sockfd, p->ai_addr, p->ai_addrlen) == -1) {
-            close(server_sockfd);
-            syslog(LOG_ERR, "bind failed: %s", strerror(errno));
-            continue;
-        }
-
-        break;
-        
-    }
-
-    freeaddrinfo(servinfo); // all done with this structure
-
-    if (p == NULL)  {
-        syslog(LOG_ERR, "server: failed to bind");
-        return -1;
-    }
-
-    if (listen(server_sockfd, BACKLOG) == -1) {
-        syslog(LOG_ERR, "listen: %s", strerror(errno));
-        return -1;
-    }
-
-    return 1;
 }
 
 void daemonize() {
@@ -190,112 +178,41 @@ void daemonize() {
     freopen("/dev/null", "w", stderr);
 }
 
-int wait_connection_from_client(char* client_ip, size_t ip_len) {
-    struct sockaddr_storage client_addr;
-    socklen_t addr_size = sizeof(client_addr);
-    client_sockfd = accept(server_sockfd, (struct sockaddr *)&client_addr, &addr_size);
-    if (client_sockfd == -1) {
-        syslog(LOG_ERR, "accept failed: %s", strerror(errno));
-        return -1;
-    }
-
-    // Captures client's IP and register on syslog
-    inet_ntop(client_addr.ss_family, 
-                (client_addr.ss_family == AF_INET)
-                ? (void *)&(((struct sockaddr_in *)&client_addr)->sin_addr)
-                : (void *)&(((struct sockaddr_in6 *)&client_addr)->sin6_addr),
-                client_ip, ip_len);
-    
-    return 0;
-}
-
-// Receives dada from client and appends to TMP_DATA_FILE, creating this file if it doesn’t exist.
-int recv_client_data_and_append_to_file(char *data_buf, size_t buf_len) {
-    int data_file = open(TMP_DATA_FILE, O_CREAT | O_WRONLY | O_APPEND, 0644);
-    if (data_file == -1) {
-        syslog(LOG_ERR, "Failed to open data file: %s", strerror(errno));
-        close(client_sockfd);
-        return -1;
-    }
-
-    // We dont receive the client data at once because it can be very large, 
-    // therefore we only received a total of 'buf_len' bytes, and append it.
-    // Repeat the processes in a loop until all the data has been received.
-    ssize_t bytes_received;
-    while ((bytes_received = recv(client_sockfd, data_buf, buf_len, 0)) > 0) {
-        write(data_file, data_buf, bytes_received);
-        // If found '\n', stop reading
-        if (memchr(data_buf, '\n', bytes_received)) break;
-    }
-    close(data_file);
-
-    return 0;
-}
-
-// Returns the full content of TMP_DATA_FILE to the client as soon as the received data packet completes.
-int send_file_data_to_client(char *data_buf, size_t buf_len) {
-    int data_file = open(TMP_DATA_FILE, O_RDONLY);
-    if (data_file == -1) {
-        syslog(LOG_ERR, "Failed to open data file for reading");
-        close(client_sockfd);
-        return -1;
-    }
-
-    // We dont read the file at once because it can be very large, 
-    // therefore we only read a total of 'buf_len' bytes, and send it.
-    // Repeat the processes in a loop until all the data has been send.
-    ssize_t bytes_received;
-    while ((bytes_received = read(data_file, data_buf, buf_len)) > 0) {
-        send(client_sockfd, data_buf, bytes_received, 0);
-    }
-    close(data_file);
-    return 0;
-}
-
 int main(int argc, char *argv[]) {
     int daemon_mode = 0;
-
     // Verify args to detect deamon mode (-d)
     if (argc > 1 && strcmp(argv[1], "-d") == 0) {
         daemon_mode = 1;
     }
 
-    openlog("SimpleStreamServer", LOG_PID | LOG_CONS | LOG_PERROR, LOG_USER);
-    setup_signal_handlers();
+    /* Register signal handlers */
+    setup_signal_exit_handlers();
 
-    if(!open_server_socket()) {
+    openlog(PROCESS_NAME, LOG_PID | LOG_CONS | LOG_PERROR, LOG_USER);
+    
+    /* Start the server on the default port */
+    if(server_start(PORT) != 0) {
+        syslog(LOG_ERR, "starting server FAIL!");
         return -1;
     }
-
-    syslog(LOG_INFO, "Server listening on port %s", PORT);
-
+    
+    /* Any Thread must be created AFTER DAEMONIZATION, as the FORK process doesnt inherit threads*/
     if (daemon_mode) {
         syslog(LOG_INFO, "Running in daemon mode");
         daemonize();
     }
 
-    // Wait for a connection from a client, 
-    // receives data from it and append to file, 
-    // returns the full file data back to the client, 
-    // then closes the connection
-    char client_ip[INET6_ADDRSTRLEN];
-    char buffer[BUFFER_SIZE];
-    while (1) {
-        if(wait_connection_from_client(client_ip, sizeof(client_ip)) == -1) {
-            continue;
-        }
+    /* Create Timer thread */
+    #if USE_THREAD_TIMER
+    setup_timer_thread();
+    #else
+    setup_timer_handler();
+    #endif
 
-        syslog(LOG_INFO, "Accepted connection from %s", client_ip);
+    /* Accept connections until a signal (SIGINT/SIGTERM) stops the server */
+    server_run();
 
-        if(recv_client_data_and_append_to_file(buffer, BUFFER_SIZE) == -1) {
-            continue;
-        }
-
-        if(send_file_data_to_client(buffer, BUFFER_SIZE) == -1) {
-            continue;
-        }
-
-        syslog(LOG_INFO, "Closed connection from %s", client_ip);
-        close(client_sockfd);
-    }
+    /* Stop the server gracefully (close socket, join threads, etc.) */
+    server_stop();
 }
+
